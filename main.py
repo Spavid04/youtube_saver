@@ -123,17 +123,26 @@ def setStatusEx(download_dir: str, id: str, title: str, status: str, exceptions:
 def isProcessed(download_dir: str, id: str) -> bool:
     return any((id in x) for x in os.listdir(download_dir))
 
-def fetchNewEntries(cookiesfile: str, url: str, config: Config) -> typing.Generator[Entry, None, None]:
+@dataclasses.dataclass()
+class NewEntriesResult():
+    TotalIds: int = 0
+    HasSeen: int = 0
+    NewEntries: typing.Generator[Entry, None, None] = None
+def fetchNewEntries(cookiesfile: str, url: str, config: Config) -> NewEntriesResult:
     options = {
         "cookiefile": cookiesfile
     }
     newEntries = list()
+    result = NewEntriesResult()
 
     with yt_dlp.YoutubeDL(options) as ytdl:
         info = ytdl.extract_info(url, download=False, process=False)
         for i in info["entries"]:
             id = i["id"]
+            result.TotalIds += 1
+
             if isProcessed(config.DownloadDirectory, id):
+                result.HasSeen += 1
                 continue
 
             entry = Entry(id=id, duration=i["duration"], title=i["title"], url=i["url"], raw_data=i)
@@ -141,23 +150,28 @@ def fetchNewEntries(cookiesfile: str, url: str, config: Config) -> typing.Genera
 
     newEntries.sort(key=lambda x: x.duration or -1)
 
-    with yt_dlp.YoutubeDL(options) as ytdl:
-        for entry in newEntries:
-            try:
-                info = ytdl.extract_info(entry.url, download=False)
-            except Exception as e:
-                setStatusEx(config.DownloadDirectory, entry.id, entry.title, "failed", [e], entry.raw_data)
-                continue
+    def __fetchGenerator():
+        with yt_dlp.YoutubeDL(options) as ytdl:
+            for entry in newEntries:
+                try:
+                    info = ytdl.extract_info(entry.url, download=False)
+                except Exception as e:
+                    setStatusEx(config.DownloadDirectory, entry.id, entry.title, "failed", [e], entry.raw_data)
+                    continue
 
-            if entry.duration is None or entry.duration == -1:
-                setStatusEx(config.DownloadDirectory, entry.id, entry.title, "invalid-duration", None, entry.raw_data)
-                continue
+                if entry.duration is None or entry.duration == -1:
+                    setStatusEx(config.DownloadDirectory, entry.id, entry.title, "invalid-duration", None,
+                                entry.raw_data)
+                    continue
 
-            entry.filesize = info.get("filesize_approx")
-            entry.uploadDate = utils.parseDateString(info["upload_date"])
-            entry.raw_data = info
+                entry.filesize = info.get("filesize_approx")
+                entry.uploadDate = utils.parseDateString(info["upload_date"])
+                entry.raw_data = info
 
-            yield entry
+                yield entry
+
+    result.NewEntries = __fetchGenerator()
+    return result
 
 def getYtdlInstances_video(config: Config) -> typing.List[yt_dlp.YoutubeDL]:
     options = {
@@ -222,14 +236,20 @@ def downloadUrl(ytdl: yt_dlp.YoutubeDL, url: str) -> bool:
 def download(config: Config):
     os.chdir(config.TemporaryDownloads)
 
-    entries = fetchNewEntries(config.CookiesFile, config.SourceUrl, config)
+    result = fetchNewEntries(config.CookiesFile, config.SourceUrl, config)
+
+    total = result.TotalIds - result.HasSeen
+
+    print(f"Total videos: {result.TotalIds}")
+    print(f"Unprocessed videos: {total}")
 
     if config.AudioOnly:
         ytdls = getYtdlInstances_audio(config)
     else:
         ytdls = getYtdlInstances_video(config)
 
-    for entry in entries:
+    progress = 0
+    for entry in result.NewEntries:
         success = False
         exceptions = list()
 
@@ -239,6 +259,8 @@ def download(config: Config):
                 break
             except Exception as e:
                 exceptions.append(e)
+
+        progress += 1
 
         if success:
             files = os.listdir(config.TemporaryDownloads)
@@ -255,6 +277,9 @@ def download(config: Config):
         else:
             utils.clearDir(config.TemporaryDownloads)
             setStatusEx(config.DownloadDirectory, entry.id, entry.title, "failed", exceptions, entry.raw_data)
+
+        if progress % 10 == 0:
+            print(f"Progress:\t{progress}\t{total}")
 
 # "https://www.youtube.com/playlist?list=LL"
 # "https://music.youtube.com/playlist?list=LM"
