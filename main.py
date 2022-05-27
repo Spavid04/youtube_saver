@@ -2,6 +2,7 @@ import argparse
 import copy
 import dataclasses
 import datetime
+import enum
 import io
 import json
 import os
@@ -28,6 +29,7 @@ class Config():
 
     Noisy: bool
     Aria2c: bool
+    RetryFailed: bool
     FfmpegPath: str
 
 def parseArgs() -> Config:
@@ -45,6 +47,7 @@ def parseArgs() -> Config:
 
     parser.add_argument("--noisy", required=False, default=False, action="store_true", help="Don't suppress ytdlp messages.")
     parser.add_argument("--aria2c", required=False, default=False, action="store_true", help="Use aria2c as the external downloader.")
+    parser.add_argument("--retry-failed", required=False, default=False, action="store_true", help="Retry failed downloads.")
     parser.add_argument("--ffmpeg-path", type=str, required=False, default=None, help="If ffmpeg is not in PATH, use it from here.")
 
     parser.add_argument("url", type=str, help="URL to a playlist or single video.")
@@ -69,6 +72,7 @@ def parseArgs() -> Config:
         CookiesFile=os.path.abspath(args.cookies),
         Noisy=args.noisy,
         Aria2c=args.aria2c,
+        RetryFailed=args.retry_failed,
         FfmpegPath=os.path.abspath(ffmpegPath)
     )
 
@@ -81,6 +85,10 @@ def parseArgs() -> Config:
 
 # -f bestaudio --extract-audio --audio-quality 0 --audio-format opus --no-mtime --embed-thumbnail --embed-metadata
 
+class State(enum.Enum):
+    Unprocessed = 0
+    OK = 1
+    Failed = 2
 
 @dataclasses.dataclass()
 class Entry():
@@ -92,6 +100,7 @@ class Entry():
     filesize: float = 0
     uploadDate: datetime.date = None
     raw_data: dict = None
+    state: State = None
 
 
 def setStatus(download_dir: str, id: str, title: str, status: str, extra: typing.Optional[typing.Union[str, typing.TextIO]] = None):
@@ -120,20 +129,43 @@ def setStatusEx(download_dir: str, id: str, title: str, status: str, exceptions:
         extraInfo.seek(0)
         setStatus(download_dir, id, title, status, extraInfo)
 
-def isProcessed(download_dir: str, id: str) -> bool:
-    return any((id in x) for x in os.listdir(download_dir))
+def GetState(download_dir: str, id: str) -> State:
+    matches = [x for x in os.listdir(download_dir) if id in x]
+
+    if len(matches) == 0:
+        return State.Unprocessed
+    if len(matches) > 1:
+        raise Exception("Invalid state for id %s" % id)
+
+    if matches[0].endswith(".txt"):
+        return State.Failed
+    else:
+        return State.OK
+
+def DeleteFailure(download_dir: str, id: str):
+    matches = [x for x in os.listdir(download_dir) if x.endswith(".txt") and id in x]
+
+    if len(matches) == 0:
+        return
+    if len(matches) > 1:
+        raise Exception("Invalid state for id %s" % id)
+
+    os.remove(os.path.join(download_dir, matches[0]))
 
 @dataclasses.dataclass()
 class NewEntriesResult():
     TotalIds: int = 0
     HasSeen: int = 0
+    FailuresToRetry: typing.List[str] = None
     NewEntries: typing.Generator[Entry, None, None] = None
 def fetchNewEntries(cookiesfile: str, url: str, config: Config) -> NewEntriesResult:
     options = {
         "cookiefile": cookiesfile
     }
     newEntries = list()
+    failuresToRetry = list()
     result = NewEntriesResult()
+    result.FailuresToRetry = failuresToRetry
 
     with yt_dlp.YoutubeDL(options) as ytdl:
         info = ytdl.extract_info(url, download=False, process=False)
@@ -141,11 +173,14 @@ def fetchNewEntries(cookiesfile: str, url: str, config: Config) -> NewEntriesRes
             id = i["id"]
             result.TotalIds += 1
 
-            if isProcessed(config.DownloadDirectory, id):
+            state = GetState(config.DownloadDirectory, id)
+            if state == State.OK or (state == State.Failed and not config.RetryFailed):
                 result.HasSeen += 1
                 continue
+            elif state == State.Failed:
+                failuresToRetry.append(id)
 
-            entry = Entry(id=id, duration=i["duration"], title=i["title"], url=i["url"], raw_data=i)
+            entry = Entry(id=id, duration=i["duration"], title=i["title"], url=i["url"], raw_data=i, state=state)
             newEntries.append(entry)
 
     newEntries.sort(key=lambda x: x.duration or -1)
@@ -242,6 +277,10 @@ def download(config: Config):
 
     print(f"Total videos: {result.TotalIds}")
     print(f"Unprocessed videos: {total}")
+
+    if result.FailuresToRetry:
+        for id in result.FailuresToRetry:
+            DeleteFailure(config.DownloadDirectory, id)
 
     if config.AudioOnly:
         ytdls = getYtdlInstances_audio(config)
