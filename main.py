@@ -292,6 +292,8 @@ def download(config: Config):
         success = False
         exceptions = list()
 
+        print(f"Downloading: {entry.title}")
+
         for ytdl in ytdls:
             try:
                 success = downloadUrl(ytdl, entry.url)
