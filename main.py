@@ -32,7 +32,7 @@ class Config():
     RetryFailed: bool
     FfmpegPath: str
 
-def parseArgs() -> Config:
+def parseArgs() -> typing.Optional[Config]:
     parser = argparse.ArgumentParser(description="Youtube convenient auto saver")
 
     parser.add_argument("--cookies-from-browser", type=str, required=False, default=None, help="Automatically fetch cookies from a browser.",
@@ -52,7 +52,10 @@ def parseArgs() -> Config:
 
     parser.add_argument("url", type=str, help="URL to a playlist or single video.")
 
-    args = parser.parse_args()
+    try:
+        args = parser.parse_args()
+    except:
+        return None
 
     if args.download_directory == args.temp_directory:
         raise Exception("Temporary and download directories must be different!")
@@ -332,6 +335,22 @@ def download(config: Config):
 def main():
     config = parseArgs()
 
+    if config is None:
+        # parsing failed, print some "custom" help
+
+        print()
+        print()
+        print()
+        print("Some simple examples:")
+        print()
+        print("Download all liked videos, with certain options:")
+        print(r'''.\main.py --cookies-from-browser "chrome" --cookies "cookies.txt" --download-directory ".\ytdls" --temp-directory ".\__downloading" --clear-temp-directory --aria2c "https://www.youtube.com/playlist?list=LL"''')
+        print()
+        print("Download all liked songs, as indexed by youtube music, as audio only:")
+        print(r'''.\main.py --cookies-from-browser "chrome" --cookies "cookies.txt" --download-directory ".\ytdls\music" --temp-directory ".\__downloading" --clear-temp-directory --audio-only --aria2c "https://music.youtube.com/playlist?list=LM"''')
+
+        return -1
+
     if not os.path.isdir(config.DownloadDirectory):
         os.mkdir(config.DownloadDirectory)
 
@@ -347,5 +366,7 @@ def main():
     if config.Browser is not None:
         os.remove(config.CookiesFile)
 
+    return 0
+
 if __name__ == "__main__":
-    main()
+    exit(main())

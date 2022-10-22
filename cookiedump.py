@@ -10,7 +10,8 @@ SUPPORTED_BROWSERS = {
     "chrome": browser_cookie3.chrome,
     "firefox": browser_cookie3.firefox,
     "edge": browser_cookie3.edge,
-    "opera": browser_cookie3.opera
+    "opera": browser_cookie3.opera,
+    "brave": browser_cookie3.brave
 }
 
 def toText(value) -> str:
