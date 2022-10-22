@@ -95,6 +95,7 @@ class Entry():
     id: str
     duration: float
     title: str
+    uploader: str
     url: str
 
     filesize: float = 0
@@ -167,6 +168,8 @@ def fetchNewEntries(cookiesfile: str, url: str, config: Config) -> NewEntriesRes
     result = NewEntriesResult()
     result.FailuresToRetry = failuresToRetry
 
+    durationLambda = lambda d: d["duration"] if "duration" in d else 0
+
     with yt_dlp.YoutubeDL(options) as ytdl:
         info = ytdl.extract_info(url, download=False, process=False)
         for i in info["entries"]:
@@ -180,7 +183,7 @@ def fetchNewEntries(cookiesfile: str, url: str, config: Config) -> NewEntriesRes
             elif state == State.Failed:
                 failuresToRetry.append(id)
 
-            entry = Entry(id=id, duration=i["duration"], title=i["title"], url=i["url"], raw_data=i, state=state)
+            entry = Entry(id=id, duration=durationLambda(i), title=i["title"], uploader=i["uploader"], url=i["url"], raw_data=i, state=state)
             newEntries.append(entry)
 
     newEntries.sort(key=lambda x: x.duration or -1)
@@ -300,6 +303,7 @@ def download(config: Config):
                 break
             except Exception as e:
                 exceptions.append(e)
+                utils.clearDir(config.TemporaryDownloads)
 
         progress += 1
 

@@ -1,11 +1,24 @@
 import datetime
 import os
+import time
 
 
-def clearDir(path: str):
+def clearDir(path: str, retries: int = 5):
     if os.path.isdir(path):
-        for file in os.listdir(path):
-            os.remove(os.path.join(path, file))
+        while retries > 0:
+            somethingFailed = False
+
+            for file in os.listdir(path):
+                try:
+                    os.remove(os.path.join(path, file))
+                except Exception as e:
+                    somethingFailed = True
+
+            if somethingFailed:
+                retries -= 1
+                time.sleep(5)
+            else:
+                retries = 0
 
 def parseDateString(string: str) -> datetime.date:
     assert len(string) == 8
