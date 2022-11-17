@@ -186,7 +186,7 @@ def fetchNewEntries(cookiesfile: str, url: str, config: Config) -> NewEntriesRes
             elif state == State.Failed:
                 failuresToRetry.append(id)
 
-            entry = Entry(id=id, duration=durationLambda(i), title=i["title"], uploader=i["uploader"], url=i["url"], raw_data=i, state=state)
+            entry = Entry(id=id, duration=durationLambda(i), title=i["title"], uploader=i.get("uploader", ""), url=i["url"], raw_data=i, state=state)
             newEntries.append(entry)
 
     newEntries.sort(key=lambda x: x.duration or -1)
